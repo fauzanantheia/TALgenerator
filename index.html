@@ -2119,6 +2119,31 @@ function camLights(c){
 /* a still of the current product, used for catalogue cards and saved-design thumbnails */
 var thumbCam=new THREE.PerspectiveCamera(FOV,1,0.1,200);
 var SNAPDIR={mailer:[0.8,0.62,0.95],tuck:[0.6,0.75,1],tube:[0.45,0.3,1],bag:[0.55,0.28,1],sos:[0.55,0.28,1],pouch:[0.3,0.1,1],sachet:[0.3,0.1,1],tee:[0.3,0.3,1],longtee:[0.3,0.3,1],hoodie:[0.3,0.3,1],sweat:[0.3,0.3,1],vest:[0.3,0.3,1]};
+/* Thumbnails are drawn into an off-screen render target and read back as pixels. Reading the visible WebGL
+   canvas with toDataURL is unreliable in some browsers (Safari), which made the catalogue fall back to flat dielines. */
+var thumbRT=null;
+function rtSnap(size){
+  var S=size*2,i;
+  if(!thumbRT||thumbRT.width!==S){
+    if(thumbRT)thumbRT.dispose();
+    thumbRT=new THREE.WebGLRenderTarget(S,S,{format:THREE.RGBAFormat,type:THREE.UnsignedByteType,depthBuffer:true,stencilBuffer:false});
+    thumbRT.texture.encoding=THREE.sRGBEncoding;thumbRT.texture.generateMipmaps=false;
+  }
+  var prev=renderer.getRenderTarget();
+  renderer.setRenderTarget(thumbRT);renderer.clear(true,true,true);renderer.render(scene,thumbCam);
+  var px=new Uint8Array(S*S*4);renderer.readRenderTargetPixels(thumbRT,0,0,S,S,px);
+  renderer.setRenderTarget(prev);
+  var any=false;for(i=3;i<px.length;i+=4*61)if(px[i]>8){any=true;break}
+  if(!any)return null;
+  var c=document.createElement("canvas");c.width=S;c.height=S;
+  var x=c.getContext("2d"),id=x.createImageData(S,S),row=S*4;
+  for(var y=0;y<S;y++)id.data.set(px.subarray((S-1-y)*row,(S-y)*row),y*row);
+  x.putImageData(id,0,0);
+  var o=document.createElement("canvas");o.width=size;o.height=size;
+  var ox=o.getContext("2d");ox.imageSmoothingEnabled=true;try{ox.imageSmoothingQuality="high"}catch(err){}
+  ox.drawImage(c,0,0,size,size);
+  return o.toDataURL("image/png");
+}
 function snap3D(size){
   if(!hasGL||!product)return null;
   var url=null,f0=state.fold,o0=state.open,sp0=spinG.rotation.y,pr=renderer.getPixelRatio(),v=new THREE.Vector3(),s=new THREE.Vector3();
@@ -2129,9 +2154,13 @@ function snap3D(size){
     var dir=new THREE.Vector3().fromArray(SNAPDIR[D.shape]||[0.5,0.4,1]).normalize(),dist=fitDist(dir,1,s,0.9);
     thumbCam.aspect=1;thumbCam.position.copy(dir.multiplyScalar(dist));thumbCam.lookAt(0,0,0);thumbCam.updateProjectionMatrix();
     spinG.rotation.y=0;
-    renderer.setPixelRatio(1);renderer.setSize(size,size,false);renderer.render(scene,thumbCam);
-    url=renderer.domElement.toDataURL("image/png");
-  }catch(err){url=null}
+    try{url=rtSnap(size)}catch(err){url=null;window.__thumbErr="rt: "+(err&&err.message||err)}
+    if(!url){
+      renderer.setPixelRatio(1);renderer.setSize(size,size,false);renderer.render(scene,thumbCam);
+      url=renderer.domElement.toDataURL("image/png");
+      if(!url||url.length<200)url=null;
+    }
+  }catch(err){url=null;window.__thumbErr="canvas: "+(err&&err.message||err);if(window.console)console.warn("3D thumbnail failed",err)}
   state.fold=f0;state.open=o0;spinG.rotation.y=sp0;renderer.setPixelRatio(pr);
   recenter();resize3D();
   if(state.mode==="3d"&&view.clientWidth){renderer.render(scene,camera)}
