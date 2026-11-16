@@ -37,7 +37,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
+      - name: Check the build tools
+        run: |
+          node --version
+          java -version
+          echo "Android SDK: ${ANDROID_HOME:-${ANDROID_SDK_ROOT:-not found}}"
+          ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms" "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" || true
 
       - name: Install Capacitor
         run: npm install --no-audit --no-fund
@@ -45,6 +50,8 @@ jobs:
       - name: Create the Android project
         run: |
           npx cap add android
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          if [ -n "$SDK" ]; then echo "sdk.dir=$SDK" > android/local.properties; fi
           RES=android/app/src/main/res
           if [ -d resources/android/res ]; then
             cp -r resources/android/res/. "$RES/"
